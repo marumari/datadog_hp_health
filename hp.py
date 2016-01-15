@@ -25,9 +25,7 @@ class HPHardwareCheck(AgentCheck):
     DEFAULT_MIN_COLLECTION_INTERVAL = 900  # in seconds
 
     def hpacucli_query(self, query, shell):
-        cmd = ""
-        output = ""
-        proc = ""
+        cmd = output = proc = ""
         safe_query = "ERROR IN COMMAND"
         r1 = re.compile("^show [\w\d=]+$")
     # FIXME
@@ -56,8 +54,7 @@ class HPHardwareCheck(AgentCheck):
             self.log.error("Failed when starting {0}: {1}\n".format(cmd, e))
         else:
             if proc is not None:
-                proc.stdin.write("\n{0}\n".format(safe_query))
-                proc.stdin.write("quit\n")
+                proc.stdin.write("\n{0}\nquit\n".format(safe_query))
                 lines = proc.communicate()
                 if lines is not None:
                     for line in lines:
@@ -81,24 +78,19 @@ class HPHardwareCheck(AgentCheck):
     # Module #:                     4
     # Status:                       Ok
     #
-        dimm_status = {}
         dimm_list = []
+
         if raw_status is not None:
-            for line in raw_status.split('\n'):
-                new_line = line.split()
-                if new_line is not None:
-                    if "Processor" in new_line and "#:" in new_line:
-                        # new chunk - add the previous one to the list and create a new dict
-                        dimm_list.append(dimm_status)
-                        dimm_status = {}
-                        dimm_status["Processor"] = new_line[2]
-                    if "Module" in new_line and "#:" in new_line:
-                        dimm_status["Module"] = new_line[2]
-                    if "Status:" in new_line:
-                        dimm_status["Status"] = new_line[1].lower()
-            # add the last dict
-            dimm_list.append(dimm_status)
-        return(dimm_list)
+            for line in raw_status.split("\n"):
+                if "Processor #:" in line:
+                    dimm_status = { "Processor": line.split()[-1] }
+                elif "Module #:" in line:
+                    dimm_status["Module"] = line.split()[-1]
+                elif "Status:" in line:
+                    dimm_status["Status"] = line.split()[-1].lower()
+                    dimm_list.append(dimm_status)
+
+        return dimm_list
 
     def show_smartarray_pd(self, raw_status):
     #
@@ -107,23 +99,18 @@ class HPHardwareCheck(AgentCheck):
     #      physicaldrive 1I:1:3 (port 1I:box 1:bay 3, SATA, 1 TB, OK)
     #      physicaldrive 1I:1:4 (port 1I:box 1:bay 4, SATA, 1 TB, Predictive Failure)
     #
-        pd_status = {}
         pd_list = []
+
         if raw_status is not None:
             for line in raw_status.split('\n'):
-                if line is not None:
-                    if "physicaldrive" in line:
-                        pd_list.append(pd_status)
-                        pd_status = {}
-                        new_line = line.split()
-                        if new_line is not None:
-                            pd_status = {
-                                "Drive": new_line[1],
-                                "Status": new_line[9][0:2].lower(),
-                                "Capacity": new_line[7] + new_line[8],
-                            }
-            pd_list.append(pd_status)
-        return(pd_list)
+                if "physicaldrive" in line:
+                    pd_list.append({
+                        "Drive": line.split()[1],
+                        "Status": line.split()[9][0:2].lower(),
+                        "Capacity": line.split(",")[2].strip(),
+                    })
+
+        return pd_list
 
     def show_smartarray_ld(self, raw_status):
     #
@@ -131,23 +118,18 @@ class HPHardwareCheck(AgentCheck):
     #
     # logicaldrive 1 (6.4 TB, 5): OK
     #
-        ld_status = {}
         ld_list = []
+
         if raw_status is not None:
             for line in raw_status.split('\n'):
-                if line is not None:
-                    if "logicaldrive" in line:
-                        ld_list.append(ld_status)
-                        ld_status = {}
-                        new_line = line.split()
-                        if new_line is not None:
-                            ld_status = {
-                                "Drive": new_line[1],
-                                "Status": new_line[6][0:2].lower(),
-                                "Capacity": new_line[2][1:] + new_line[3],
-                            }
-            ld_list.append(ld_status)
-        return(ld_list)
+                if "logicaldrive" in line:
+                    ld_list.append({
+                        "Drive": line.split()[1],
+                        "Status": line.split()[-1].lower(),
+                        "Capacity": line.split("(")[1].split(",")[0],
+                    })
+
+        return ld_list
 
     def show_smartarray_controller(self, raw_status):
     # hpssacli ctrl all show status
@@ -157,26 +139,21 @@ class HPHardwareCheck(AgentCheck):
     #   Cache Status: OK
     #   Battery/Capacitor Status: OK
     #
-        ctrl_status = {}
         ctrl_list = []
+
         if raw_status is not None:
             for line in raw_status.split('\n'):
-                if line is not None:
-                    new_line = line.split()
-                    if new_line is not None:
-                        if "Slot" in line:
-                            ctrl_list.append(ctrl_status)
-                            ctrl_status = {}
-                            # Let's use the full name as a key
-                            ctrl_status['Name'] = " ".join(new_line[0:]).strip()
-                        if "Controller" in line and "Status" in line:
-                            ctrl_status['Controller'] = new_line[2].lower()
-                        if "Cache" in line:
-                            ctrl_status['Cache'] = new_line[2].lower()
-                        if "Battery" in line:
-                            ctrl_status['Battery'] = new_line[2].lower()
-            ctrl_list.append(ctrl_status)
-        return(ctrl_list)
+                if "Slot" in line:
+                    ctrl_status = { "Name": line.strip() }
+                elif "Controller" in line and "Status" in line:
+                    ctrl_status['Controller'] = line.split()[-1].lower()
+                elif "Cache" in line:
+                    ctrl_status['Cache'] = line.split()[-1].lower()
+                elif "Battery" in line:
+                    ctrl_status['Battery'] = line.split()[-1].lower()
+                    ctrl_list.append(ctrl_status)
+
+        return ctrl_list
 
     def show_iml(self, raw_status):
     #
@@ -295,8 +272,6 @@ class HPHardwareCheck(AgentCheck):
 
     def error_generic_event(self, status, event_type, msg_title, msg_text):
 
-        alert_type = "warning"
-
         if "ok" not in status:
             alert_type = "error"
         else:
@@ -305,6 +280,7 @@ class HPHardwareCheck(AgentCheck):
         if msg_text is None:
             msg_text = " "
 
+        # What is this?  Is it supposed to be executed, returned? There is no self.event()  Not sure what's happening.
         out = self.event({
                 "timestamp": int(time.time()),
                 "event_type": event_type,
@@ -443,7 +419,7 @@ def main():
     for instance in instances:
         check.check(instance)
         if check.has_events():
-            print 'Events: %s' % (check.get_events())
+            print "Events: %s" % (check.get_events())
 
 if __name__ == "__main__":
     main()
